@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Wellness Reminders</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the Canvas environment
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // Gemini API Key (This will be filled in by the Canvas environment)
+        const apiKey = "";
+
+        // --- Firebase Initialization and Authentication ---
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        
+        // This will hold the user's ID and the document reference once authenticated
+        let userId = 'loading...';
+        let reminderDocRef = null;
+
+        // --- DOM Elements ---
+        const waterButton = document.getElementById('waterBtn');
+        const exerciseButton = document.getElementById('exerciseBtn');
+        const getExerciseIdeaBtn = document.getElementById('getExerciseIdeaBtn');
+        const exerciseIdeaDisplay = document.getElementById('exerciseIdea');
+        const messageBox = document.getElementById('messageBox');
+        const messageText = document.getElementById('messageText');
+        const waterCountdownDisplay = document.getElementById('waterCountdown');
+        const exerciseCountdownDisplay = document.getElementById('exerciseCountdown');
+        const activityLogList = document.getElementById('activityLogList');
+        const resetButton = document.getElementById('resetBtn');
+
+        // --- Timer State and Logic ---
+        const reminderInterval = 60 * 60* 1000; // 1 min in milliseconds
+        const waterAudio = new Audio('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'); // Example sound
+        const exerciseAudio = new Audio('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3'); // Example sound
+
+        let waterTimer = null;
+        let exerciseTimer = null;
+        let waterRemainingTime = reminderInterval;
+        let exerciseRemainingTime = reminderInterval;
+        
+        let waterRunning = false;
+        let exerciseRunning = false;
+        let lastWaterReminder = 0;
+        let lastExerciseReminder = 0;
+        let activityLog = [];
+
+        async function authenticate() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                userId = auth.currentUser.uid;
+                document.getElementById('userIdDisplay').textContent = `Your User ID: ${userId}`;
+                
+                // Firestore document path for private user data
+                reminderDocRef = doc(db, `/artifacts/${appId}/users/${userId}/reminders`, 'myReminders');
+
+                // --- Real-time updates from Firestore ---
+                onSnapshot(reminderDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        waterRunning = data.waterRunning || false;
+                        exerciseRunning = data.exerciseRunning || false;
+                        lastWaterReminder = data.lastWaterReminder || Date.now();
+                        lastExerciseReminder = data.lastExerciseReminder || Date.now();
+                        activityLog = data.activityLog || [];
+                        updateUI();
+                    } else {
+                        // Document doesn't exist, create it with initial state
+                        setDoc(reminderDocRef, {
+                            waterRunning: false,
+                            exerciseRunning: false,
+                            lastWaterReminder: Date.now(),
+                            lastExerciseReminder: Date.now(),
+                            activityLog: []
+                        });
+                    }
+                }, (error) => {
+                    console.error("Error listening to Firestore:", error);
+                });
+
+            } catch (error) {
+                console.error("Authentication failed:", error);
+            }
+        }
+        authenticate();
+
+        // --- Update UI function ---
+        function updateUI() {
+            // Update button text and state
+            waterButton.textContent = waterRunning ? 'Stop Water Reminders' : 'Start Water Reminders';
+            waterButton.classList.toggle('bg-red-500', waterRunning);
+            waterButton.classList.toggle('hover:bg-red-600', waterRunning);
+            waterButton.classList.toggle('bg-blue-500', !waterRunning);
+            waterButton.classList.toggle('hover:bg-blue-600', !waterRunning);
+            
+            exerciseButton.textContent = exerciseRunning ? 'Stop Exercise Reminders' : 'Start Exercise Reminders';
+            exerciseButton.classList.toggle('bg-red-500', exerciseRunning);
+            exerciseButton.classList.toggle('hover:bg-red-600', exerciseRunning);
+            exerciseButton.classList.toggle('bg-green-500', !exerciseRunning);
+            exerciseButton.classList.toggle('hover:bg-green-600', !exerciseRunning);
+
+            // Update countdown displays
+            if (waterRunning) {
+                if (!waterTimer) {
+                    waterTimer = setInterval(updateWaterCountdown, 1000);
+                }
+            } else {
+                clearInterval(waterTimer);
+                waterTimer = null;
+                waterCountdownDisplay.textContent = 'Paused';
+            }
+            if (exerciseRunning) {
+                if (!exerciseTimer) {
+                    exerciseTimer = setInterval(updateExerciseCountdown, 1000);
+                }
+            } else {
+                clearInterval(exerciseTimer);
+                exerciseTimer = null;
+                exerciseCountdownDisplay.textContent = 'Paused';
+            }
+
+            // Update activity log
+            activityLogList.innerHTML = '';
+            // Sort the log in descending order by timestamp
+            const sortedLog = activityLog.sort((a, b) => b.timestamp - a.timestamp);
+            if (sortedLog.length === 0) {
+                const li = document.createElement('li');
+                li.className = 'p-2 bg-gray-100 dark:bg-gray-700 rounded-md shadow-inner text-sm text-center';
+                li.textContent = 'No recent reminders.';
+                activityLogList.appendChild(li);
+            } else {
+                sortedLog.forEach(log => {
+                    const li = document.createElement('li');
+                    li.className = 'p-2 bg-gray-100 dark:bg-gray-700 rounded-md shadow-inner text-sm';
+                    const date = new Date(log.timestamp);
+                    const timeString = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+                    li.textContent = `${log.type} reminder triggered at ${timeString}`;
+                    activityLogList.appendChild(li);
+                });
+            }
+        }
+        
+        // --- Countdown logic ---
+        function updateWaterCountdown() {
+            const timeSinceLast = Date.now() - lastWaterReminder;
+            waterRemainingTime = Math.max(0, reminderInterval - timeSinceLast);
+            const minutes = Math.floor((waterRemainingTime / 1000 / 60) % 60);
+            const seconds = Math.floor((waterRemainingTime / 1000) % 60);
+            waterCountdownDisplay.textContent = `${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+            if (waterRemainingTime <= 0) {
+                triggerReminder('Water');
+            }
+        }
+
+        function updateExerciseCountdown() {
+            const timeSinceLast = Date.now() - lastExerciseReminder;
+            exerciseRemainingTime = Math.max(0, reminderInterval - timeSinceLast);
+            const minutes = Math.floor((exerciseRemainingTime / 1000 / 60) % 60);
+            const seconds = Math.floor((exerciseRemainingTime / 1000) % 60);
+            exerciseCountdownDisplay.textContent = `${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+            if (exerciseRemainingTime <= 0) {
+                triggerReminder('Exercise');
+            }
+        }
+
+        // --- Reminder Triggering and Firestore Update ---
+        function triggerReminder(type) {
+            const now = Date.now();
+            const logEntry = {
+                type: type,
+                timestamp: now,
+            };
+
+            const updatedData = {
+                activityLog: [...activityLog, logEntry]
+            };
+            
+            if (type === 'Water') {
+                waterAudio.play();
+                updatedData.lastWaterReminder = now;
+            } else if (type === 'Exercise') {
+                exerciseAudio.play();
+                updatedData.lastExerciseReminder = now;
+            }
+            
+            // Update Firestore with the new log entry and last reminder time
+            updateDoc(reminderDocRef, updatedData);
+
+            // Display a message to the user
+            showMessage(`Time to ${type.toLowerCase()}!`);
+        }
+        
+        // --- Gemini API Call for Exercise Idea ---
+        async function getExerciseIdea() {
+            const prompt = "Provide a very short, simple, and fun 5-minute exercise routine for someone who has been sitting for a long time. The response should be a concise, single-paragraph summary of the routine.";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+            exerciseIdeaDisplay.textContent = "Generating a new idea...";
+            getExerciseIdeaBtn.disabled = true;
+
+            try {
+                const payload = {
+                    contents: [{ parts: [{ text: prompt }] }],
+                    tools: [{ "google_search": {} }]
+                };
+                
+                let response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status} ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || "No idea could be generated at this time.";
+                exerciseIdeaDisplay.textContent = text;
+            } catch (error) {
+                console.error("Failed to fetch exercise idea:", error);
+                exerciseIdeaDisplay.textContent = "Sorry, something went wrong. Please try again.";
+            } finally {
+                getExerciseIdeaBtn.disabled = false;
+            }
+        }
+
+        // --- Event Listeners ---
+        waterButton.addEventListener('click', async () => {
+            const newWaterRunningState = !waterRunning;
+            if (reminderDocRef) {
+                await updateDoc(reminderDocRef, {
+                    waterRunning: newWaterRunningState,
+                    // Reset timer when started
+                    lastWaterReminder: newWaterRunningState ? Date.now() : lastWaterReminder
+                });
+            }
+        });
+
+        exerciseButton.addEventListener('click', async () => {
+            const newExerciseRunningState = !exerciseRunning;
+            if (reminderDocRef) {
+                await updateDoc(reminderDocRef, {
+                    exerciseRunning: newExerciseRunningState,
+                    // Reset timer when started
+                    lastExerciseReminder: newExerciseRunningState ? Date.now() : lastExerciseReminder
+                });
+            }
+        });
+        
+        getExerciseIdeaBtn.addEventListener('click', getExerciseIdea);
+        
+        resetButton.addEventListener('click', async () => {
+            if (reminderDocRef) {
+                // Reset the activity log in Firestore
+                await updateDoc(reminderDocRef, {
+                    activityLog: [],
+                    lastWaterReminder: Date.now(),
+                    lastExerciseReminder: Date.now(),
+                    waterRunning: false,
+                    exerciseRunning: false
+                });
+                showMessage('All reminders and logs have been reset.');
+            }
+        });
+
+        // --- Custom Message Box (instead of alert) ---
+        function showMessage(text) {
+            messageText.textContent = text;
+            messageBox.classList.remove('hidden');
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, 3000);
+        }
+    </script>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans flex items-center justify-center min-h-screen p-4">
+    <main class="w-full max-w-2xl mx-auto bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-700 space-y-8">
+        <header class="text-center">
+            <h1 class="text-4xl font-extrabold text-blue-400">Family Wellness</h1>
+            <p class="text-lg text-gray-400 mt-2">Hourly reminders for water and exercise.</p>
+            <p id="userIdDisplay" class="text-xs text-gray-500 mt-2">Loading user ID...</p>
+        </header>
+
+        <!-- Main Reminders Section -->
+        <section class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            <!-- Water Reminder Card -->
+            <div class="bg-gray-700 p-6 rounded-xl shadow-md space-y-4">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-2xl font-bold text-blue-300">Drink Water</h2>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-blue-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 2-2h15.03a2 2 0 0 1 2 2 24.12 24.12 0 0 1 0 10Z"/>
+                        <path d="M12 10a7 7 0 0 0-7 7"/>
+                        <path d="M12 14a3 3 0 0 0-3 3"/>
+                        <path d="M21.5 17a24.12 24.12 0 0 0 0-10"/>
+                    </svg>
+                </div>
+                <div class="text-center">
+                    <div id="waterCountdown" class="text-5xl font-extrabold text-blue-400">Loading...</div>
+                    <p class="text-sm text-gray-400">Time to next reminder</p>
+                </div>
+                <button id="waterBtn" class="w-full py-3 px-6 rounded-full font-bold transition duration-300 bg-blue-500 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">Start Water Reminders</button>
+            </div>
+
+            <!-- Exercise Reminder Card -->
+            <div class="bg-gray-700 p-6 rounded-xl shadow-md space-y-4">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-2xl font-bold text-green-300">Exercise</h2>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-green-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 20v-4.5a3.5 3.5 0 1 0-7 0V20"/>
+                        <path d="M17.5 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>
+                        <path d="M8.5 15.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>
+                        <path d="M12 18v-5"/>
+                        <path d="M12 22a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/>
+                        <path d="M22 2v20h-20V2h20zM6 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>
+                        <path d="M18 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>
+                    </svg>
+                </div>
+                <div class="text-center">
+                    <div id="exerciseCountdown" class="text-5xl font-extrabold text-green-400">Loading...</div>
+                    <p class="text-sm text-gray-400">Time to next reminder</p>
+                </div>
+                <div class="space-y-2">
+                    <button id="exerciseBtn" class="w-full py-3 px-6 rounded-full font-bold transition duration-300 bg-green-500 hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50">Start Exercise Reminders</button>
+                    <button id="getExerciseIdeaBtn" class="w-full py-3 px-6 rounded-full font-bold transition duration-300 bg-purple-500 hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50">Get Exercise Idea ✨</button>
+                    <p id="exerciseIdea" class="text-sm text-gray-300 mt-2 text-center p-2 rounded-lg bg-gray-600">Click the button for a new idea!</p>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Activity Log -->
+        <section class="bg-gray-700 p-6 rounded-xl shadow-md space-y-4">
+            <div class="flex justify-between items-center">
+                <h2 class="text-2xl font-bold text-yellow-300">Activity Log</h2>
+                <button id="resetBtn" class="text-sm text-red-400 hover:text-red-300 transition-colors">Reset Log</button>
+            </div>
+            <ul id="activityLogList" class="space-y-2 text-gray-300">
+                <li class="p-2 bg-gray-100 dark:bg-gray-700 rounded-md shadow-inner text-sm text-center">No recent reminders.</li>
+            </ul>
+        </section>
+
+    </main>
+    
+    <!-- Custom Message Box -->
+    <div id="messageBox" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-full shadow-lg z-50 transition-transform duration-300 ease-out transform-gpu scale-100">
+        <span id="messageText" class="font-semibold"></span>
+    </div>
+</body>
+</html>
