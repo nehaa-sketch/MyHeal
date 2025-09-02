@@ -1,0 +1,76 @@
+mutation SeedData @auth(level: USER) {
+  user_upsertMany(data: [
+    {
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      createdAt: "2024-01-01T00:00:00Z",
+      dailyExerciseGoalMinutes: 30,
+      dailyWaterGoalMl: 2000,
+      displayName: "Example User 1",
+      email: "user1@example.com"
+    },
+    {
+      id: "550e8400-e29b-41d4-a716-446655440001",
+      createdAt: "2024-01-02T00:00:00Z",
+      dailyExerciseGoalMinutes: 60,
+      dailyWaterGoalMl: 3000,
+      displayName: "Example User 2",
+      email: "user2@example.com"
+    }
+  ])
+  logEntry_upsertMany(data: [
+    {
+      id: "650e8400-e29b-41d4-a716-446655440000",
+      userId: "550e8400-e29b-41d4-a716-446655440000",
+      exerciseDurationMinutes: 35,
+      logType: "Exercise",
+      loggedAt: "2024-01-03T00:00:00Z",
+      waterAmountMl: 0
+    },
+    {
+      id: "650e8400-e29b-41d4-a716-446655440001",
+      userId: "550e8400-e29b-41d4-a716-446655440000",
+      exerciseDurationMinutes: 0,
+      logType: "Water",
+      loggedAt: "2024-01-03T00:00:00Z",
+      waterAmountMl: 2500
+    }
+  ])
+  pauseSchedule_upsertMany(data: [
+    {
+      id: "750e8400-e29b-41d4-a716-446655440000",
+      userId: "550e8400-e29b-41d4-a716-446655440000",
+      endTime: "2024-01-03T12:30:00Z",
+      isActive: true,
+      recurrence: "Daily",
+      startTime: "2024-01-03T12:00:00Z"
+    },
+    {
+      id: "750e8400-e29b-41d4-a716-446655440001",
+      userId: "550e8400-e29b-41d4-a716-446655440001",
+      endTime: "2024-01-04T14:30:00Z",
+      isActive: false,
+      recurrence: "Weekly",
+      startTime: "2024-01-04T14:00:00Z"
+    }
+  ])
+  reminderSetting_upsertMany(data: [
+    {
+      id: "850e8400-e29b-41d4-a716-446655440000",
+      userId: "550e8400-e29b-41d4-a716-446655440000",
+      frequencyMinutes: 60,
+      isEnabled: true,
+      reminderType: "Water",
+      soundPreference: "Default",
+      vibrationEnabled: true
+    },
+    {
+      id: "850e8400-e29b-41d4-a716-446655440001",
+      userId: "550e8400-e29b-41d4-a716-446655440001",
+      frequencyMinutes: 120,
+      isEnabled: false,
+      reminderType: "Exercise",
+      soundPreference: "None",
+      vibrationEnabled: false
+    }
+  ])
+}

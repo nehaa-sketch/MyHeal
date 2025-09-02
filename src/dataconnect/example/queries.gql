@@ -1,0 +1,31 @@
+mutation CreateUser @auth(level: USER) {
+  user_insert(data: {
+    email: "example@example.com",
+    createdAt_expr: "request.time"
+  })
+}
+
+query GetUser @auth(level: USER) {
+  user(key: {id_expr: "auth.uid"}) {
+    id
+    email
+    displayName
+  }
+}
+
+mutation UpdateDailyGoals($exerciseGoal: Int, $waterGoal: Int) @auth(level: USER) {
+  user_update(key: {id_expr: "auth.uid"}, data: {
+    dailyExerciseGoalMinutes: $exerciseGoal,
+    dailyWaterGoalMl: $waterGoal
+  })
+}
+
+query ListLogEntries @auth(level: USER) {
+  logEntries(where: {userId: {eq_expr: "auth.uid"}}) {
+    id
+    logType
+    loggedAt
+    exerciseDurationMinutes
+    waterAmountMl
+  }
+}

@@ -1,0 +1,33 @@
+type User @table {
+  email: String!
+  createdAt: Timestamp!
+  displayName: String
+  dailyWaterGoalMl: Int
+  dailyExerciseGoalMinutes: Int
+}
+
+type ReminderSetting @table {
+  user: User!
+  reminderType: String!
+  frequencyMinutes: Int!
+  isEnabled: Boolean!
+  lastTriggeredAt: Timestamp
+  soundPreference: String
+  vibrationEnabled: Boolean
+}
+
+type LogEntry @table {
+  user: User!
+  logType: String!
+  loggedAt: Timestamp!
+  waterAmountMl: Int
+  exerciseDurationMinutes: Int
+}
+
+type PauseSchedule @table {
+  user: User!
+  startTime: Timestamp!
+  endTime: Timestamp!
+  isActive: Boolean!
+  recurrence: String
+}
